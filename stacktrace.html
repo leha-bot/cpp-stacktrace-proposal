@@ -22,17 +22,19 @@
         </style>
     </head>
     <body bgcolor="#ffffff">
-        <address>Document number: D0881R0</address>
+        <address>Document number: D0881R1</address>
         <address>Project: Programming Language C++</address>
         <address>Audience: Library Evolution</address>
         <address>&nbsp;</address>
         <address>Alexey Gorgurov &lt;<a href="mailto:leha-bot@yandex.ru">leha-bot@yandex.ru</a>&gt;, &lt;<a href="mailto:no-vista@yandex.ru">no-vista@yandex.ru</a>&gt;</address>
         <address>Antony Polukhin &lt;<a href="mailto:antoshkka@gmail.com">antoshkka@gmail.com</a>&gt;, &lt;<a href="mailto:antoshkka@yandex-team.ru">antoshkka@yandex-team.ru</a>&gt;</address>
         <address>&nbsp;</address>
-        <address>Date: 2018-01-23</address>
+        <address>Date: 2018-04-13</address>
         <h1>A Proposal to add stack trace library</h1>
 
-        <!--p class='notes'>Green lines are notes for the <b>editor</b> or for the <b>SG14</b> that must not be treated as part of the wording.</p-->
+        <p class='changed-added'>Significant changes to <a href="http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0881r0.html">P0881R0</a> are marked with blue.<p>
+        <p><input type="checkbox" id="show_deletions" onchange="show_hide_deleted()"> Show deleted lines from P0881R0.</p>
+
         <h2>I. Motivation</h2>
 	<p>In the current working draft [<a href="http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/n4713.pdf">N4713</a>] there is no way to get,store and decode the current call sequence.
 	Such call sequences are useful for debugging and post mortem debugging. They are popular in other programming languages (like Java, C#, Python).</p>
@@ -65,8 +67,21 @@ Backtrace:
 	<h2>III. Design Decisions</h2>
 	<p>The design is based on the Boost.Stacktrace library, a popular library that does not depend on any non-standard library components.</p>
 	<p><b>Note about signal safety:</b> this proposal does not attempt to provide a signal-safe solution for capturing and decoding stacktraces.
-	Such functionality currently is not implementable on some of the popular platforms. However, the paper attempts to provide extendable solution, that may be made signal safe some day.</p>
-	<p><b>Note on performance:</b> during Boost.Stacktrace development phase many users requested a fast way to store stack trace, without decoding the function names. This functionality is preserved in the paper.</p>
+	Such functionality currently is not implementable on some of the popular platforms. However, the paper attempts to provide extensible solution, that may be made signal safe some day
+	<span class="changed-added">by providing a signal safe allocator and changing the <code>stacktrace</code> implementation details</span>.</p>
+	<p><b>Note on performance:</b> during Boost.Stacktrace development phase many users requested a fast way to store stack trace, without decoding the function names. This functionality is preserved in the paper.
+	<span class="changed-added">All the <code>stack_frame</code> functions and constructors are lazy and won't decode the pointer information if there was no explicit request from class user.</span></p>
+	<p class="changed-added"><b>Note on allocations:</b> initial implementations of Boost.Stacktrace were not using allocator and all the frames were placed inside a fixed size internal storage.
+	That was a mistake! Sometimes the most important information is located at the bottom of the stack. For example if you run Boost.Test, then the test name will be located low on the stack.
+	With a fixed size storage the bottom of the stack could be lost along with the information.</p>
+	<p class="changed-added">Current design assumes that by default users wish to see the whole stack and OK with dynamic allocations, because do not construct <code>stacktrace</code>
+	in performance critical places.
+	For those users, who wish to use <code>stacktrace</code> on a hot path or in embedded environments <code>basic_stacktrace</code> allows to provide a custom allocator that allocates
+	on the stack or in some other place, where users thinks it is appropriate.</p>
+	<p class="changed-added"><b>Note on returning <code>std::string</code> and not having <code>noexcept</code> on <code>stack_frame::source_line()</code></b>:
+	Unfortunately this is a necessarity on some platforms, where getting source line requires allocating or where source
+	file name <a href="https://github.com/boostorg/stacktrace/blob/a0f948e9f505cb53baf582fccbcb3024fd255ee1/include/boost/stacktrace/detail/frame_msvc.ipp#L213-L219">retuned into</a> a storage
+	<a href="http://www.qnx.com/developers/docs/6.5.0/index.jsp?topic=%2Fcom.qnx.doc.neutrino_lib_ref%2Fb%2Fbt_get_backtrace.html"> provided by user</a>.</p>
 
 
     <h2>IV. Proposed Interface</h2>
@@ -113,7 +128,7 @@ namespace std {
     // construct/copy/destruct
     constexpr stack_frame() noexcept;
     constexpr stack_frame(const stack_frame&amp;) noexcept = default;
-    constexpr stack_frame&amp; operator=(const stack_frame&amp;) = default;
+    constexpr stack_frame&amp; operator=(const stack_frame&amp;)<span class="changed-added"> noexcept</span> = default;
 
     constexpr explicit stack_frame(native_frame_ptr_t f) noexcept;
     template&lt;typename T&gt; explicit stack_frame(T* address) noexcept;
@@ -123,7 +138,7 @@ namespace std {
 
     constexpr strong_ordering operator &lt;=&gt;(const stack_frame&amp; rhs) = default;
 
-    // functions that querying information about stored address
+    // functions that query<span class="changed-deleted">ing</span> information about stored address
     string name() const;
     string source_file() const;
     size_t source_line() const;
@@ -172,7 +187,8 @@ namespace std {
     using const_reference = const value_type &amp;;
     using size_type = <i>implementation-defined</i>;
     using const_iterator = <i>implementation-defined</i>;
-    using allocaotr_type = Allocator;
+    <span class="changed-added">using allocator_type = Allocator;</span>
+    <span class="changed-deleted">using allocaotr_type = Allocator;</span>
 
     // functions that capture current call sequence
     basic_stacktrace() noexcept;
@@ -183,7 +199,7 @@ namespace std {
     basic_stacktrace(const basic_stacktrace &);
     basic_stacktrace(basic_stacktrace &&) noexcept;
     basic_stacktrace & operator=(const basic_stacktrace &);
-    basic_stacktrace & operator=(basic_stacktrace &&);
+    basic_stacktrace & operator=(basic_stacktrace &&)<span class="changed-added"> noexcept</span>;
     ~basic_stacktrace();
 
     // public member functions
@@ -195,7 +211,7 @@ namespace std {
     explicit operator bool() const noexcept;
 
     template &lt;typename Allocator2&gt;
-    strong_ordering operator &lt;=&gt;(const basic_stacktrace&lt; Allocator2 &gt;&amp; rhs) = default;
+    strong_ordering operator &lt;=&gt;(const basic_stacktrace&lt; Allocator2 &gt;&amp; rhs) <span class="changed-added"> noexcept</span> = default;
 
   private:
     vector&lt;value_type&gt;    stack_frames; // exposition only
@@ -242,14 +258,11 @@ explicit basic_stacktrace(const allocator_type & a) noexcept;</pre>
             colorize_texts(document.getElementsByTagName("pre"));
             colorize_texts(document.getElementsByTagName("code"));
 
-            var show = false;
             function show_hide_deleted() {
                 var to_change = document.getElementsByClassName('changed-deleted');
                 for (var i = 0; i < to_change.length; ++i) {
-                    to_change[i].style.display = (show ? 'block' : 'none');
+                    to_change[i].style.display = (document.getElementById("show_deletions").checked ? 'block' : 'none');
                 }
-
-                show = !show;
             }
             show_hide_deleted()
         </script>
